@@ -19,8 +19,11 @@ export default function AIAssistant({ activeTasks }: AIAssistantProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeechSupported, setIsSpeechSupported] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   // Initialize selected tasks to all tasks when modal opens or tasks change
   useEffect(() => {
@@ -57,6 +60,75 @@ export default function AIAssistant({ activeTasks }: AIAssistantProps) {
     }
   }, [isOpen]);
 
+  // Initialize speech recognition
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        setIsSpeechSupported(true);
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = () => {
+          setIsListening(true);
+          setError(null);
+        };
+
+        recognition.onresult = (event: any) => {
+          let interimTranscript = '';
+          let finalTranscript = '';
+
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalTranscript += transcript + ' ';
+            } else {
+              interimTranscript += transcript;
+            }
+          }
+
+          setInputMessage((prev) => {
+            // Remove previous interim results and add new ones
+            const baseText = prev.replace(/\s*\[Listening\.\.\.\]\s*$/, '');
+            return baseText + finalTranscript + (interimTranscript ? `[Listening...]` : '');
+          });
+        };
+
+        recognition.onerror = (event: any) => {
+          console.error('Speech recognition error:', event.error);
+          setIsListening(false);
+          if (event.error === 'no-speech') {
+            setError('No speech detected. Please try again.');
+          } else if (event.error === 'not-allowed') {
+            setError('Microphone permission denied. Please enable microphone access.');
+          } else {
+            setError(`Speech recognition error: ${event.error}`);
+          }
+        };
+
+        recognition.onend = () => {
+          setIsListening(false);
+          // Clean up interim results marker
+          setInputMessage((prev) => prev.replace(/\s*\[Listening\.\.\.\]\s*$/, ''));
+        };
+
+        recognitionRef.current = recognition;
+      }
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {
+          // Ignore errors when stopping
+        }
+      }
+    };
+  }, []);
+
   const handleTaskToggle = (taskId: string) => {
     setSelectedTaskIds((prev) => {
       const newSet = new Set(prev);
@@ -75,7 +147,15 @@ export default function AIAssistant({ activeTasks }: AIAssistantProps) {
     e?.preventDefault();
     if (!inputMessage.trim() || isLoading || selectedTasks.length === 0) return;
 
-    const userMessage = inputMessage.trim();
+    // Stop listening if currently listening
+    if (isListening) {
+      handleStopListening();
+    }
+
+    // Clean up any interim results marker
+    const userMessage = inputMessage.replace(/\s*\[Listening\.\.\.\]\s*$/, '').trim();
+    if (!userMessage) return;
+
     setInputMessage('');
     setError(null);
 
@@ -121,6 +201,29 @@ export default function AIAssistant({ activeTasks }: AIAssistantProps) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
+    }
+  };
+
+  const handleStartListening = () => {
+    if (!recognitionRef.current || isListening) return;
+
+    try {
+      // Clean up any previous interim results
+      setInputMessage((prev) => prev.replace(/\s*\[Listening\.\.\.\]\s*$/, ''));
+      recognitionRef.current.start();
+    } catch (error) {
+      console.error('Error starting speech recognition:', error);
+      setError('Failed to start speech recognition. Please try again.');
+    }
+  };
+
+  const handleStopListening = () => {
+    if (recognitionRef.current && isListening) {
+      try {
+        recognitionRef.current.stop();
+      } catch (error) {
+        console.error('Error stopping speech recognition:', error);
+      }
     }
   };
 
@@ -177,6 +280,10 @@ export default function AIAssistant({ activeTasks }: AIAssistantProps) {
                   )}
                   <button
                     onClick={() => {
+                      // Stop listening if active
+                      if (isListening) {
+                        handleStopListening();
+                      }
                       setIsOpen(false);
                       setMessages([]);
                       setError(null);
@@ -321,23 +428,51 @@ export default function AIAssistant({ activeTasks }: AIAssistantProps) {
                 )}
               </div>
               <form onSubmit={handleSendMessage} className="flex gap-2">
-                <textarea
-                  ref={inputRef}
-                  value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={
-                    selectedTasks.length === 0
-                      ? 'Select at least one task above to chat...'
-                      : 'Type your message... (Press Enter to send, Shift+Enter for new line)'
-                  }
-                  rows={2}
-                  className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
-                  disabled={isLoading || selectedTasks.length === 0}
-                />
+                <div className="flex-1 relative">
+                  <textarea
+                    ref={inputRef}
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder={
+                      selectedTasks.length === 0
+                        ? 'Select at least one task above to chat...'
+                        : isSpeechSupported
+                        ? 'Type your message or click the microphone to speak... (Press Enter to send, Shift+Enter for new line)'
+                        : 'Type your message... (Press Enter to send, Shift+Enter for new line)'
+                    }
+                    rows={2}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2 pr-10 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
+                    disabled={isLoading || selectedTasks.length === 0 || isListening}
+                  />
+                  {isSpeechSupported && (
+                    <button
+                      type="button"
+                      onClick={isListening ? handleStopListening : handleStartListening}
+                      disabled={isLoading || selectedTasks.length === 0}
+                      className={`absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full transition-colors ${
+                        isListening
+                          ? 'bg-red-500 text-white hover:bg-red-600 animate-pulse'
+                          : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                      } disabled:cursor-not-allowed disabled:opacity-50`}
+                      title={isListening ? 'Stop listening' : 'Start voice input'}
+                    >
+                      {isListening ? (
+                        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+                          <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+                        </svg>
+                      ) : (
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                        </svg>
+                      )}
+                    </button>
+                  )}
+                </div>
                 <button
                   type="submit"
-                  disabled={isLoading || !inputMessage.trim() || selectedTasks.length === 0}
+                  disabled={isLoading || !inputMessage.trim() || selectedTasks.length === 0 || isListening}
                   className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isLoading ? (
