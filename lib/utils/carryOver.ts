@@ -1,81 +1,69 @@
 import { format, isSameDay, parseISO } from 'date-fns';
-import { supabase } from '../supabase/client';
-import { Task } from '../supabase/types';
+import {
+  getActiveTasks,
+  getAppState,
+  saveAppState,
+  localTaskToTask,
+  updateActiveTask,
+} from './taskStorage';
 
 /**
  * Checks if the date has changed since last view and carries over uncompleted tasks
+ * This function works with localStorage for active tasks
  */
 export async function checkAndCarryOverTasks(): Promise<void> {
+  if (typeof window === 'undefined') return;
+
   const today = new Date();
   const todayStr = format(today, 'yyyy-MM-dd');
 
-  // Get or create app state
-  const { data: appStateData, error: appStateError } = await supabase
-    .from('app_state')
-    .select('*')
-    .limit(1)
-    .single();
-
-  if (appStateError && appStateError.code !== 'PGRST116') {
-    // PGRST116 is "not found" error, which is expected on first run
-    console.error('Error fetching app state:', appStateError);
-    return;
-  }
-
-  let lastViewedDate: string | null = null;
-
-  if (appStateData) {
-    lastViewedDate = appStateData.last_viewed_date;
-  }
+  // Get app state from localStorage
+  const appState = getAppState();
+  const lastViewedDate = appState?.last_viewed_date || null;
 
   // If no last viewed date or dates are different, carry over tasks
   if (!lastViewedDate || !isSameDay(parseISO(lastViewedDate), today)) {
     if (lastViewedDate) {
-      // Find all uncompleted tasks from the previous date
-      const { data: tasksToCarryOver, error: tasksError } = await supabase
-        .from('tasks')
-        .select('*')
-        .eq('created_date', lastViewedDate)
-        .neq('status', 'accomplished');
+      // Get all active tasks from localStorage
+      const activeTasks = getActiveTasks();
+      
+      // Filter tasks from the previous date
+      const tasksToCarryOver = activeTasks.filter(
+        (task) => task.created_date === lastViewedDate
+      );
 
-      if (tasksError) {
-        console.error('Error fetching tasks to carry over:', tasksError);
-        return;
-      }
+      if (tasksToCarryOver.length > 0) {
+        // Convert to Task format and save to database with carry_over status
+        const tasksToSave = tasksToCarryOver.map((t) => localTaskToTask(t, 'carry_over'));
 
-      if (tasksToCarryOver && tasksToCarryOver.length > 0) {
-        // Update tasks to carry_over status and move to today
-        const taskIds = tasksToCarryOver.map((task) => task.id);
-        const { error: updateError } = await supabase
-          .from('tasks')
-          .update({
-            status: 'carry_over',
-            created_date: todayStr,
-            updated_at: new Date().toISOString(),
-          })
-          .in('id', taskIds);
+        try {
+          // Save to database
+          const response = await fetch('/api/tasks/batch', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ tasks: tasksToSave }),
+          });
 
-        if (updateError) {
-          console.error('Error updating tasks:', updateError);
+          if (!response.ok) {
+            console.error('Error saving carry-over tasks to database');
+            return;
+          }
+
+          // Update tasks in localStorage to today's date
+          tasksToCarryOver.forEach((task) => {
+            updateActiveTask(task.id, { created_date: todayStr });
+          });
+        } catch (error) {
+          console.error('Error carrying over tasks:', error);
           return;
         }
       }
     }
 
-    // Update or create app state with today's date
-    if (appStateData) {
-      await supabase
-        .from('app_state')
-        .update({
-          last_viewed_date: todayStr,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', appStateData.id);
-    } else {
-      await supabase.from('app_state').insert({
-        last_viewed_date: todayStr,
-      });
-    }
+    // Update app state with today's date
+    saveAppState({ last_viewed_date: todayStr });
   }
 }
 

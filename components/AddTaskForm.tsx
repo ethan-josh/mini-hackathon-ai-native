@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { format } from 'date-fns';
+import { saveActiveTask, createTaskId, type LocalTask } from '@/lib/utils/taskStorage';
 
 interface AddTaskFormProps {
   onTaskAdded: () => void;
@@ -12,48 +13,31 @@ export default function AddTaskForm({ onTaskAdded }: AddTaskFormProps) {
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
 
     setIsSubmitting(true);
     try {
       const today = format(new Date(), 'yyyy-MM-dd');
-      const response = await fetch('/api/tasks', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title: title.trim(),
-          description: description.trim() || null,
-          status: 'active',
-          created_date: today,
-        }),
-      });
+      const now = new Date().toISOString();
+      
+      const newTask: LocalTask = {
+        id: createTaskId(),
+        title: title.trim(),
+        description: description.trim() || null,
+        created_date: today,
+        created_at: now,
+      };
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to add task');
-      }
+      saveActiveTask(newTask);
 
       setTitle('');
       setDescription('');
       onTaskAdded();
     } catch (error: any) {
       console.error('Error adding task:', error);
-      const errorMessage = error?.message || 'Unknown error';
-      
-      // Provide helpful error messages based on common issues
-      let userMessage = errorMessage;
-      if (errorMessage?.includes('relation') || errorMessage?.includes('does not exist')) {
-        userMessage = 'Database tables not found. Please run the SQL setup script in Supabase (see supabase-setup.sql)';
-      } else if (errorMessage?.includes('permission') || errorMessage?.includes('policy')) {
-        userMessage = 'Permission denied. Please check your Supabase RLS policies.';
-      }
-
-      alert(`Failed to add task: ${userMessage}\n\nCheck the browser console for more details.`);
+      alert('Failed to add task. Please try again.');
     } finally {
       setIsSubmitting(false);
     }

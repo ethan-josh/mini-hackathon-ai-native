@@ -3,48 +3,40 @@
 import { useEffect, useState } from 'react';
 import { Task } from '@/lib/supabase/types';
 import { format } from 'date-fns';
+import { getActiveTasks, type LocalTask } from '@/lib/utils/taskStorage';
+import { checkAndCarryOverTasks } from '@/lib/utils/carryOver';
 import AddTaskForm from '@/components/AddTaskForm';
 import TaskList from '@/components/TaskList';
 import Sidebar from '@/components/Sidebar';
 import AIAssistant from '@/components/AIAssistant';
 
 export default function Home() {
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasks, setTasks] = useState<LocalTask[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   const today = format(new Date(), 'yyyy-MM-dd');
 
-  const fetchTasks = async () => {
+  const loadTasks = async () => {
     try {
       // First, check and carry over tasks if needed
-      await fetch('/api/carryover', { method: 'POST' });
+      await checkAndCarryOverTasks();
 
-      // Fetch today's tasks (active and carry_over)
-      const response = await fetch(
-        `/api/tasks?date=${today}&status=active,carry_over`
-      );
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to fetch tasks');
-      }
-
-      setTasks(result.data || []);
+      // Load active tasks from localStorage
+      const activeTasks = getActiveTasks();
+      // Filter to today's tasks
+      const todayTasks = activeTasks.filter((t) => t.created_date === today);
+      setTasks(todayTasks);
     } catch (error: any) {
-      console.error('Error fetching tasks:', error);
+      console.error('Error loading tasks:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchTasks();
+    loadTasks();
   }, []);
-
-  const archivedTasks = tasks.filter((t) => t.status === 'accomplished');
-  const carryOverTasks = tasks.filter((t) => t.status === 'carry_over');
 
   // Fetch all archived and carry-over tasks for sidebar
   const [allArchivedTasks, setAllArchivedTasks] = useState<Task[]>([]);
@@ -118,18 +110,13 @@ export default function Home() {
         </div>
 
         {/* Add Task Form */}
-        <AddTaskForm onTaskAdded={fetchTasks} />
+        <AddTaskForm onTaskAdded={loadTasks} />
 
         {/* Task List */}
-        <TaskList
-          tasks={tasks}
-          onUpdate={fetchTasks}
-          onTaskSelect={setSelectedTask}
-          selectedTaskId={selectedTask?.id}
-        />
+        <TaskList tasks={tasks} onUpdate={loadTasks} />
 
         {/* AI Assistant */}
-        <AIAssistant selectedTask={selectedTask} />
+        <AIAssistant activeTasks={tasks} />
 
         {/* Sidebar */}
         <Sidebar
