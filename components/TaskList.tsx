@@ -53,6 +53,10 @@ export default function TaskList({ tasks, onUpdate }: TaskListProps) {
       deleteActiveTasks(Array.from(selectedTaskIds));
       setSelectedTaskIds(new Set());
       onUpdate();
+      // Trigger sidebar refresh if open
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taskUpdated'));
+      }
     } catch (error: any) {
       console.error('Error marking tasks as done:', error);
       alert(`Failed to mark tasks as done: ${error.message || 'Please try again.'}`);

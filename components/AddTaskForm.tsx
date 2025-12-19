@@ -11,6 +11,7 @@ interface AddTaskFormProps {
 export default function AddTaskForm({ onTaskAdded }: AddTaskFormProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [dueDate, setDueDate] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -28,13 +29,20 @@ export default function AddTaskForm({ onTaskAdded }: AddTaskFormProps) {
         description: description.trim() || null,
         created_date: today,
         created_at: now,
+        due_date: dueDate || null,
+        ai_suggestions: [],
       };
 
       saveActiveTask(newTask);
 
       setTitle('');
       setDescription('');
+      setDueDate('');
       onTaskAdded();
+      // Trigger sidebar refresh if open
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taskUpdated'));
+      }
     } catch (error: any) {
       console.error('Error adding task:', error);
       alert('Failed to add task. Please try again.');
@@ -61,6 +69,15 @@ export default function AddTaskForm({ onTaskAdded }: AddTaskFormProps) {
           onChange={(e) => setDescription(e.target.value)}
           placeholder="Description (optional)"
           rows={2}
+          className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          disabled={isSubmitting}
+        />
+      </div>
+      <div>
+        <input
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
           className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
           disabled={isSubmitting}
         />

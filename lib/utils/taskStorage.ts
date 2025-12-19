@@ -10,6 +10,8 @@ export interface LocalTask {
   description: string | null;
   created_date: string;
   created_at: string;
+  due_date: string | null;
+  ai_suggestions: string[];
 }
 
 export interface AppState {
@@ -24,7 +26,13 @@ export function getActiveTasks(): LocalTask[] {
   
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? JSON.parse(stored) : [];
+    const tasks = stored ? JSON.parse(stored) : [];
+    // Ensure backward compatibility - add missing fields
+    return tasks.map((task: any) => ({
+      ...task,
+      due_date: task.due_date || null,
+      ai_suggestions: task.ai_suggestions || [],
+    }));
   } catch (error) {
     console.error('Error reading from localStorage:', error);
     return [];
@@ -139,7 +147,7 @@ export function localTaskToTask(localTask: LocalTask, status: 'accomplished' | '
     description: localTask.description,
     status,
     created_date: localTask.created_date,
-    due_date: null,
+    due_date: localTask.due_date || null,
   };
 }
 
@@ -148,5 +156,57 @@ export function localTaskToTask(localTask: LocalTask, status: 'accomplished' | '
  */
 export function createTaskId(): string {
   return `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+/**
+ * Add an AI suggestion to a task
+ */
+export function addAISuggestion(taskId: string, suggestion: string): void {
+  if (typeof window === 'undefined') return;
+  
+  try {
+    const tasks = getActiveTasks();
+    const index = tasks.findIndex((t) => t.id === taskId);
+    
+    if (index >= 0) {
+      const task = tasks[index];
+      const suggestions = task.ai_suggestions || [];
+      // Avoid duplicates
+      if (!suggestions.includes(suggestion)) {
+        tasks[index] = {
+          ...task,
+          ai_suggestions: [...suggestions, suggestion],
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+      }
+    }
+  } catch (error) {
+    console.error('Error adding AI suggestion:', error);
+  }
+}
+
+/**
+ * Remove an AI suggestion from a task
+ */
+export function removeAISuggestion(taskId: string, suggestionIndex: number): void {
+  if (typeof window === 'undefined') return;
+  
+  try {
+    const tasks = getActiveTasks();
+    const index = tasks.findIndex((t) => t.id === taskId);
+    
+    if (index >= 0) {
+      const task = tasks[index];
+      const suggestions = task.ai_suggestions || [];
+      const newSuggestions = suggestions.filter((_, i) => i !== suggestionIndex);
+      tasks[index] = {
+        ...task,
+        ai_suggestions: newSuggestions,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+    }
+  } catch (error) {
+    console.error('Error removing AI suggestion:', error);
+  }
 }
 

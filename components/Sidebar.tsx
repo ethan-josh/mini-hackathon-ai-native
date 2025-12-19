@@ -3,12 +3,14 @@
 import { Task } from '@/lib/supabase/types';
 import { format, parseISO } from 'date-fns';
 import { useState } from 'react';
+import { type LocalTask } from '@/lib/utils/taskStorage';
 
 interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
   archivedTasks: Task[];
   carryOverTasks: Task[];
+  upcomingTasks: LocalTask[];
 }
 
 export default function Sidebar({
@@ -16,8 +18,9 @@ export default function Sidebar({
   onClose,
   archivedTasks,
   carryOverTasks,
+  upcomingTasks,
 }: SidebarProps) {
-  const [activeTab, setActiveTab] = useState<'archive' | 'carryover'>('archive');
+  const [activeTab, setActiveTab] = useState<'archive' | 'carryover' | 'upcoming'>('archive');
 
   if (!isOpen) return null;
 
@@ -48,7 +51,7 @@ export default function Sidebar({
         <div className="flex border-b border-gray-200">
           <button
             onClick={() => setActiveTab('archive')}
-            className={`flex-1 px-6 py-3 text-sm font-medium transition-colors ${
+            className={`flex-1 px-4 py-3 text-xs font-medium transition-colors ${
               activeTab === 'archive'
                 ? 'border-b-2 border-blue-600 text-blue-600'
                 : 'text-gray-600 hover:text-gray-900'
@@ -58,13 +61,23 @@ export default function Sidebar({
           </button>
           <button
             onClick={() => setActiveTab('carryover')}
-            className={`flex-1 px-6 py-3 text-sm font-medium transition-colors ${
+            className={`flex-1 px-4 py-3 text-xs font-medium transition-colors ${
               activeTab === 'carryover'
                 ? 'border-b-2 border-blue-600 text-blue-600'
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
-            Carry Over ({carryOverTasks.length})
+            Overdue ({carryOverTasks.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('upcoming')}
+            className={`flex-1 px-4 py-3 text-xs font-medium transition-colors ${
+              activeTab === 'upcoming'
+                ? 'border-b-2 border-blue-600 text-blue-600'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Upcoming ({upcomingTasks.length})
           </button>
         </div>
 
@@ -97,17 +110,17 @@ export default function Sidebar({
                 ))
               )}
             </div>
-          ) : (
+          ) : activeTab === 'carryover' ? (
             <div className="space-y-3">
               {carryOverTasks.length === 0 ? (
                 <p className="text-center text-sm text-gray-500 py-8">
-                  No carry-over tasks.
+                  No overdue tasks.
                 </p>
               ) : (
                 carryOverTasks.map((task) => (
                   <div
                     key={task.id}
-                    className="rounded-lg border border-amber-300 bg-amber-50/50 p-3"
+                    className="rounded-lg border border-red-300 bg-red-50/50 p-3"
                   >
                     <div className="font-medium text-gray-900">{task.title}</div>
                     {task.description && (
@@ -115,11 +128,50 @@ export default function Sidebar({
                         {task.description}
                       </div>
                     )}
-                    <div className="mt-2 text-xs text-amber-700">
+                    <div className="mt-2 text-xs text-red-700">
                       From {format(parseISO(task.created_at), 'MMM d, yyyy')}
                     </div>
                   </div>
                 ))
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {upcomingTasks.length === 0 ? (
+                <p className="text-center text-sm text-gray-500 py-8">
+                  No upcoming tasks.
+                </p>
+              ) : (
+                upcomingTasks.map((task) => {
+                  let dueDateDisplay = '';
+                  if (task.due_date) {
+                    try {
+                      const dueDate = parseISO(task.due_date);
+                      dueDateDisplay = format(dueDate, 'MMM d, yyyy');
+                    } catch {
+                      dueDateDisplay = task.due_date;
+                    }
+                  }
+                  
+                  return (
+                    <div
+                      key={task.id}
+                      className="rounded-lg border border-blue-300 bg-blue-50/50 p-3"
+                    >
+                      <div className="font-medium text-gray-900">{task.title}</div>
+                      {task.description && (
+                        <div className="mt-1 text-sm text-gray-600">
+                          {task.description}
+                        </div>
+                      )}
+                      {dueDateDisplay && (
+                        <div className="mt-2 text-xs font-medium text-blue-700">
+                          Due: {dueDateDisplay}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           )}

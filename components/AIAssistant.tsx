@@ -1,6 +1,6 @@
 'use client';
 
-import { type LocalTask } from '@/lib/utils/taskStorage';
+import { type LocalTask, addAISuggestion } from '@/lib/utils/taskStorage';
 import { useState, useRef, useEffect } from 'react';
 
 interface AIAssistantProps {
@@ -10,6 +10,8 @@ interface AIAssistantProps {
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  messageId?: string;
+  selectedTaskIds?: string[];
 }
 
 export default function AIAssistant({ activeTasks }: AIAssistantProps) {
@@ -19,6 +21,7 @@ export default function AIAssistant({ activeTasks }: AIAssistantProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [includeWeeklyContext, setIncludeWeeklyContext] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isSpeechSupported, setIsSpeechSupported] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -172,6 +175,7 @@ export default function AIAssistant({ activeTasks }: AIAssistantProps) {
         },
         body: JSON.stringify({
           tasks: selectedTasks,
+          allTasks: includeWeeklyContext ? activeTasks : undefined, // Only pass if weekly context is enabled
           messages: newMessages,
         }),
       });
@@ -182,9 +186,12 @@ export default function AIAssistant({ activeTasks }: AIAssistantProps) {
       }
 
       const data = await res.json();
+      const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const assistantMessage: ChatMessage = {
         role: 'assistant',
         content: data.response || 'No response received.',
+        messageId,
+        selectedTaskIds: Array.from(selectedTaskIds),
       };
 
       setMessages([...newMessages, assistantMessage]);
@@ -224,6 +231,27 @@ export default function AIAssistant({ activeTasks }: AIAssistantProps) {
       } catch (error) {
         console.error('Error stopping speech recognition:', error);
       }
+    }
+  };
+
+  const handleAddSuggestion = (message: ChatMessage) => {
+    if (!message.selectedTaskIds || message.selectedTaskIds.length === 0) {
+      alert('No tasks were selected when this message was generated.');
+      return;
+    }
+
+    try {
+      message.selectedTaskIds.forEach((taskId) => {
+        addAISuggestion(taskId, message.content);
+      });
+      // Force a refresh by triggering a custom event that the parent can listen to
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taskUpdated'));
+      }
+      alert(`Suggestion added to ${message.selectedTaskIds.length} task${message.selectedTaskIds.length > 1 ? 's' : ''}!`);
+    } catch (error) {
+      console.error('Error adding suggestion:', error);
+      alert('Failed to add suggestion. Please try again.');
     }
   };
 
@@ -288,6 +316,7 @@ export default function AIAssistant({ activeTasks }: AIAssistantProps) {
                       setMessages([]);
                       setError(null);
                       setSelectedTaskIds(new Set());
+                      setIncludeWeeklyContext(false);
                     }}
                     className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
                     title="Close"
@@ -314,8 +343,19 @@ export default function AIAssistant({ activeTasks }: AIAssistantProps) {
             <div className="border-b border-gray-200 px-6 py-3 bg-gray-50">
               {activeTasks.length > 0 ? (
                 <div className="space-y-2">
-                  <div className="text-sm font-medium text-gray-700">
-                    Select tasks for AI context ({selectedTasks.length} of {activeTasks.length} selected):
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium text-gray-700">
+                      Select tasks for AI context ({selectedTasks.length} of {activeTasks.length} selected):
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={includeWeeklyContext}
+                        onChange={(e) => setIncludeWeeklyContext(e.target.checked)}
+                        className="h-4 w-4 cursor-pointer rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="text-xs font-medium text-gray-700">Weekly tasks</span>
+                    </label>
                   </div>
                   <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
                     {activeTasks.map((task) => {
@@ -373,14 +413,28 @@ export default function AIAssistant({ activeTasks }: AIAssistantProps) {
                     message.role === 'user' ? 'justify-end' : 'justify-start'
                   }`}
                 >
-                  <div
-                    className={`max-w-[80%] rounded-lg px-4 py-2 ${
-                      message.role === 'user'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-900'
-                    }`}
-                  >
-                    <div className="whitespace-pre-wrap text-sm">{message.content}</div>
+                  <div className="flex flex-col max-w-[80%]">
+                    <div
+                      className={`rounded-lg px-4 py-2 ${
+                        message.role === 'user'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100 text-gray-900'
+                      }`}
+                    >
+                      <div className="whitespace-pre-wrap text-sm">{message.content}</div>
+                    </div>
+                    {message.role === 'assistant' && message.selectedTaskIds && message.selectedTaskIds.length > 0 && (
+                      <button
+                        onClick={() => handleAddSuggestion(message)}
+                        className="mt-2 self-start rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 border border-blue-200"
+                        title="Add this suggestion to the selected tasks"
+                      >
+                        <svg className="mr-1.5 inline-block h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                        Add Suggestion
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
